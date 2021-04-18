@@ -27,7 +27,7 @@
   (is (undo/undos?))
   (is (not (undo/redos?)))
   (is (= [5 6 7 8 9 10] (undo/undo-explanations)))
-  (is (= [{:test 5} {:test 6} {:test 7} {:test 8} {:test 9}] @undo/undo-list))
+  (is (= [{:test 5} {:test 6} {:test 7} {:test 8} {:test 9}] @(:undo-list @undo/config)))
 
   ;; Undo the actions
   (re-frame/dispatch-sync [:undo])
@@ -50,7 +50,7 @@
   (is (not (undo/redos?)))
   (is (undo/undos?))
   (is (= [{:test 5} {:test 6} {:test 7} {:test 8} {:test 9}]
-         @undo/undo-list))
+        @(:undo-list @undo/config)))
 
   ;; Clear history
   (undo/clear-history!)
@@ -75,7 +75,7 @@
   (is (= ["change-db" "change-db" "change-db" "change-db" "change-db" "change-db"]
          (undo/undo-explanations)))
   (is (= [{:test 5} {:test 6} {:test 7} {:test 8} {:test 9}]
-         @undo/undo-list))
+        @(:undo-list @undo/config)))
 
   ;; Undo the actions
   (re-frame/dispatch-sync [:undo])
@@ -98,7 +98,7 @@
   (is (not (undo/redos?)))
   (is (undo/undos?))
   (is (= [{:test 5} {:test 6} {:test 7} {:test 8} {:test 9}]
-         @undo/undo-list)))
+        @(:undo-list @undo/config))))
 
 (deftest test-undos-interceptor-description
 
@@ -120,7 +120,7 @@
           "change-db 10"]
          (undo/undo-explanations)))
   (is (= [{:test 5} {:test 6} {:test 7} {:test 8} {:test 9}]
-         @undo/undo-list))
+        @(:undo-list @undo/config)))
 
   ;; Undo the actions
   (re-frame/dispatch-sync [:undo])
@@ -143,4 +143,4 @@
   (is (not (undo/redos?)))
   (is (undo/undos?))
   (is (= [{:test 5} {:test 6} {:test 7} {:test 8} {:test 9}]
-         @undo/undo-list)))
+        @(:undo-list @undo/config))))

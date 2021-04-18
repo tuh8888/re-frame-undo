@@ -10,7 +10,9 @@
 
 (def config (atom {:max-undos    50   ;; Maximum number of undo states maintained
                    :harvest-fn   deref
-                   :reinstate-fn reset!}))
+                   :reinstate-fn reset!
+                   :undo-list (reagent/atom [])
+                   :redo-list (reagent/atom [])}))
 
 (defn undo-config!
   "Set configuration parameters for library.
@@ -28,13 +30,6 @@
   []
   (:max-undos @config))
 
-
-
-;; -- State history ----------------------------------------------------------
-
-(def undo-list "A list of history states" (reagent/atom []))
-(def redo-list "A list of future states, caused by undoing" (reagent/atom []))
-
 ;; -- Explanations -----------------------------------------------------------
 ;;
 ;; Each undo has an associated string explanation, for display to the user.
@@ -47,13 +42,13 @@
 
 (defn clear-undos!
   []
-  (reset! undo-list [])
+  (reset! (:undo-list @config) [])
   (reset! undo-explain-list []))
 
 
 (defn clear-redos!
   []
-  (reset! redo-list [])
+  (reset! (:redo-list @config) [])
   (reset! redo-explain-list []))
 
 
@@ -68,9 +63,9 @@
   "Stores the value currently in app-db, so the user can later undo"
   [explanation]
   (clear-redos!)
-  (reset! undo-list (vec (take-last
-                           (max-undos)
-                           (conj @undo-list ((:harvest-fn @config) app-db)))))
+  (reset! (:undo-list @config) (vec (take-last
+                                      (max-undos)
+                                      (conj @(:undo-list @config) ((:harvest-fn @config) app-db)))))
   (reset! undo-explain-list (vec (take-last
                                    (max-undos)
                                    (conj @undo-explain-list @app-explain))))
@@ -80,12 +75,12 @@
 (defn undos?
   "Returns true if undos exist, false otherwise"
   []
-  (seq @undo-list))
+  (seq @(:undo-list @config)))
 
 (defn redos?
   "Returns true if redos exist, false otherwise"
   []
-  (seq @redo-list))
+  (seq @(:redo-list @config)))
 
 (defn undo-explanations
   "Returns a vector of undo descriptions, perhaps empty"
@@ -141,7 +136,7 @@
   "undo n steps or until we run out of undos"
   [n]
   (when (and (pos? n) (undos?))
-    (undo (:harvest-fn @config) (:reinstate-fn @config) undo-list app-db redo-list)
+    (undo (:harvest-fn @config) (:reinstate-fn @config) (:undo-list @config) app-db (:redo-list @config))
     (undo deref reset! undo-explain-list app-explain redo-explain-list)
     (recur (dec n))))
 
@@ -164,7 +159,7 @@
   "redo n steps or until we run out of redos"
   [n]
   (when (and (pos? n) (redos?))
-    (redo (:harvest-fn @config) (:reinstate-fn @config) undo-list app-db redo-list)
+    (redo (:harvest-fn @config) (:reinstate-fn @config) (:undo-list @config) app-db (:redo-list @config))
     (redo deref reset! undo-explain-list app-explain redo-explain-list)
     (recur (dec n))))
 
