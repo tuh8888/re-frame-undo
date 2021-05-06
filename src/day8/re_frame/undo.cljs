@@ -66,29 +66,16 @@
 
 (defn store-now!
   "Stores the value currently in app-db, so the user can later undo"
-  [explanation]
+  [explanation db]
   (clear-redos!)
-  (swap! (:undo-explain-list @config)
-    (fn [undo-explain-list-map]
-      (update undo-explain-list-map
-              app-db
-              (fn [undo-explain-list]
-                (->> @(:app-explain @config)
-                     (conj undo-explain-list)
-                     (take-last (max-undos))
-                     vec)))))
-  (swap! (:undo-list @config)
-    (fn [undo-list-map]
-      (update undo-list-map
-              app-db
-              (fn [undo-list]
-                (->> app-db
-                     ((:harvest-fn @config))
-                     (conj undo-list)
-                     (take-last (max-undos))
-                     vec)))))
-  (reset! (:app-explain @config) explanation))
-
+  (reset! undo-list
+          (vec (take-last (max-undos)
+                          (conj @undo-list [db ((:harvest-fn @config) db)]))))
+  (reset! undo-explain-list
+          (vec (take-last (max-undos)
+                          (conj @undo-explain-list
+                                [app-explain @app-explain]))))
+  (reset! app-explain explanation))
 
 (defn undos?
   "Returns true if undos exist, false otherwise"
@@ -103,9 +90,7 @@
 (defn undo-explanations
   "Returns a vector of undo descriptions, perhaps empty"
   []
-  (if (undos?)
-    (conj (get @(:undo-explain-list @config) app-db) @(:app-explain @config))
-    []))
+  (if (undos?) (conj (mapv second @undo-explain-list) @app-explain) []))
 
 ;; -- subscriptions
 ;; -----------------------------------------------------------------------------
@@ -142,28 +127,21 @@
 
 
 (defn undo
-  [harvester reinstater undos cur redos]
-  (let [u (get @undos app-db)
-        r (cons (harvester cur) (get @redos app-db))]
-    (reinstater cur (last u))
-    (swap! redos assoc app-db r)
-    (swap! undos assoc app-db (pop u))))
+  [harvester reinstater undos redos]
+  (let [u      @undos
+        [db v] (last u)
+        r      (cons [db (harvester db)] @redos)]
+    (reinstater db v)
+    (reset! redos r)
+    (reset! undos (pop u))))
 
 
 (defn undo-n
   "undo n steps or until we run out of undos"
   [n]
   (when (and (pos? n) (undos?))
-    (undo (:harvest-fn @config)
-          (:reinstate-fn @config)
-          (:undo-list @config)
-          app-db
-          (:redo-list @config))
-    (undo deref
-          reset!
-          (:undo-explain-list @config)
-          (:app-explain @config)
-          (:redo-explain-list @config))
+    (undo (:harvest-fn @config) (:reinstate-fn @config) undo-list redo-list)
+    (undo deref reset! undo-explain-list redo-explain-list)
     (recur (dec n))))
 
 (defn undo-handler
@@ -176,27 +154,20 @@
   {}); work is done directly on app-db
 
 (defn redo
-  [harvester reinstater undos cur redos]
-  (let [u (conj (get @undos app-db) (harvester cur))
-        r (get @redos app-db)]
-    (reinstater cur (first r))
-    (swap! redos assoc app-db (rest r))
-    (swap! undos assoc app-db u)))
+  [harvester reinstater undos redos]
+  (let [r      @redos
+        [db v] (first r)
+        u      (conj @undos [db (harvester db)])]
+    (reinstater db v)
+    (reset! redos (rest r))
+    (reset! undos u)))
 
 (defn redo-n
   "redo n steps or until we run out of redos"
   [n]
   (when (and (pos? n) (redos?))
-    (redo (:harvest-fn @config)
-          (:reinstate-fn @config)
-          (:undo-list @config)
-          app-db
-          (:redo-list @config))
-    (redo deref
-          reset!
-          (:undo-explain-list @config)
-          (:app-explain @config)
-          (:redo-explain-list @config))
+    (redo (:harvest-fn @config) (:reinstate-fn @config) undo-list redo-list)
+    (redo deref reset! undo-explain-list redo-explain-list)
     (recur (dec n))))
 
 (defn redo-handler
@@ -231,26 +202,29 @@
      - a nil, in which case \"\" is recorded as the explanation
   "
   ([] (undoable nil))
-  ([explanation]
+  ([explanation] (undoable explanation app-db))
+  ([explanation db]
    (re-frame/->interceptor
-    :id :undoable
-    :after
-    (fn [context]
-      (let [event (re-frame/get-coeffect context :event)
-            undo-effect (re-frame/get-effect context :undo)
-            explanation
-            (cond (some? undo-effect) undo-effect
-                  (fn? explanation)
-                  (explanation (re-frame/get-coeffect context :db) event)
-                  (string? explanation) explanation
-                  (nil? explanation) ""
-                  :else (re-frame/console
-                         :error
-                         "re-frame-undo: \"undoable\" interceptor on event "
-                         event
-                         " given a bad parameter. Got: " explanation))]
-        (store-now! explanation)
-        (update context :effects dissoc :undo))))));; remove any `:undo` effect. Already handled.
+     :id :undoable
+     :before
+     (fn [context] (when-not (= db app-db) (store-now! explanation db)) context)
+     :after
+     (fn [context]
+       (let [event (re-frame/get-coeffect context :event)
+             undo-effect (re-frame/get-effect context :undo)
+             explanation
+             (cond (some? undo-effect) undo-effect
+                   (fn? explanation)
+                   (explanation (re-frame/get-coeffect context :db) event)
+                   (string? explanation) explanation
+                   (nil? explanation) ""
+                   :else (re-frame/console
+                          :error
+                          "re-frame-undo: \"undoable\" interceptor on event "
+                          event
+                          " given a bad parameter. Got: " explanation))]
+         (when (= db app-db) (store-now! explanation db))
+         (update context :effects dissoc :undo))))));; remove any `:undo` effect. Already handled.
 
 
 ;; -- register handlers for events and subscriptions
